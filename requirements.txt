@@ -1,0 +1,11 @@
+seaborn
+wandb
+pytorch-lightning
+torch
+torchvision
+torchaudio
+jax[cuda11_cudnn805] -f https://storage.googleapis.com/jax-releases/jax_releases.html
+flax
+jaxlib
+optax
+PyYAML==5.4.1
