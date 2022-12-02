@@ -67,4 +67,8 @@ def pde_loss(x,y):
   y_h = jnp.fft.rfftn(y,axes=[0,1,-1])
   n = (x_h-y_h).real**2 + (x_h-y_h).imag**2
   y_h = ((y_h).real**2 + (y_h).imag**2)
-  return lax.pmean(jnp.sum(n)/jnp.sum(y_h), axis_name='v')
+  D_ = lambda x: jnp.stack([jnp.gradient(x, axis=-1), jnp.gradient(x, axis=0), jnp.gradient(x, axis=1),
+                 jnp.gradient(jnp.gradient(x, axis=0), axis=0), jnp.gradient(jnp.gradient(x, axis=1), axis=1)])
+  D_x = D_(x)
+  D_y = D_(y)
+  return lax.pmean(jnp.sum(n)/jnp.sum(y_h) + jnp.mean((D_x-D_y)**2), axis_name='v')

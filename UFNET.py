@@ -60,19 +60,54 @@ class operatorBlock(nn.Module):
                           jnp.linspace(0,ny,math.floor(ny*self.scale)))
     x2 = jax.vmap(jax.scipy.ndimage.map_coordinates, in_axes=(-1,None,None),out_axes=-1)(x2,coords,1)
     x = x1 + x2
-    x = nn.LayerNorm()(x)
+    x = nn.GroupNorm()(x)
     x = nn.gelu(x)
     return x
+  
+class ds_conv(nn.Module):
+    out_feats: int
+    kernel: int
+    strides: int
 
-class UNO(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+      nx = x.shape[0]
+      ny = x.shape[1]
+      coords = jnp.meshgrid(jnp.linspace(0,nx,x.shape[0]//2), 
+                          jnp.linspace(0,ny,x.shape[1]//2))
+      x = jax.vmap(jax.scipy.ndimage.map_coordinates, in_axes=(-1,None,None),out_axes=-1)(x,coords,1)
+      x1 = nn.Conv(self.out_feats, [self.kernel, self.kernel])(x)
+      x2 = nn.Conv(self.out_feats, [1,1])(x)
+      x = x1 + x2
+      x = nn.GroupNorm()(x)
+      x = nn.gelu(x)
+      return x
+
+class us_conv(nn.Module):
+    out_feats: int
+    kernel: int
+    strides: int
+
+    @nn.compact
+    def __call__(self, x):
+      nx = x.shape[0]
+      ny = x.shape[1]
+      x1 = nn.Conv(self.out_feats, [self.kernel, self.kernel])(x)
+      x2 = nn.Conv(self.out_feats, [1,1])(x)
+      x = x1 + x2
+      coords = jnp.meshgrid(jnp.linspace(0,nx,int(x.shape[0]*2)), 
+                          jnp.linspace(0,ny,int(x.shape[1]*2)))
+      x = jax.vmap(jax.scipy.ndimage.map_coordinates, in_axes=(-1,None,None),out_axes=-1)(x,coords,1)
+      x = nn.GroupNorm()(x)
+      x = nn.gelu(x)
+      return x
+
+class UFNET(nn.Module):
   encoder_blocks: int = 3
-  proc_layers: int = 1
+  proc_layers: int = 3
   decoder_blocks: int = 3
-  scale_dims: float = 3/4
   width_fc: int = 32
-  scale_feats: int = 3/2
   output_feats: int = 1
-  modes: int = 12
 
   def setup(self):
 
@@ -83,19 +118,19 @@ class UNO(nn.Module):
     decoder = []
     width = self.width_fc
     for i in range(self.encoder_blocks):
-      encoder.append(operatorBlock(math.floor(width), 
-                    math.floor(width*self.scale_feats),
-                    modes = self.modes, scale = self.scale_dims))
-      width = math.floor(width*self.scale_feats)
+      encoder.append(ds_conv(
+                            width*2,
+                            kernel = 4, strides = 1))
+      width = width * 2
     for i in range(self.encoder_blocks):
       processor.append(operatorBlock(width, 
                     width,
-                    modes = self.modes, scale = 1))
+                    modes = 8, scale = 1))
     for i in range(self.decoder_blocks):
-      decoder.append(operatorBlock(width * 2, 
-                    math.floor(width*1/self.scale_feats),
-                    modes = self.modes, scale = 1/self.scale_dims))
-      width = math.floor(width*1/self.scale_feats)
+      decoder.append(us_conv(
+                            width//2,
+                            kernel = 4, strides = 1))
+      width = width//2
     self.encoder = encoder
     self.processor = processor
     self.decoder = decoder
@@ -115,12 +150,11 @@ class UNO(nn.Module):
       x = x.reshape(size_x, size_y, -1)
       grid = self.get_grid(x.shape)
       x = jnp.concatenate((x, grid), axis=-1)
-
       x = self.fc0(x)
       h = []
       for i in range(self.encoder_blocks):
         x = self.encoder[i](x)
-        h.append(x.copy())
+        h.append(x)
       
       for i in range(self.proc_layers):
         x = self.processor[i](x)

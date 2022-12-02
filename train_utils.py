@@ -55,8 +55,8 @@ class TrainState(train_state.TrainState):
     carry: any
 
 def create_state(params, alpha, model, checkpoint=None, prefix='ckpt_epoch', steps_per_epoch = 100, carry=None):
-        steps_per_epoch = 100
-        schedule_fn = optax.exponential_decay(alpha, 100*steps_per_epoch, 0.5, transition_begin=100*steps_per_epoch, staircase=False, end_value=1e-6)
+        #schedule_fn = optax.exponential_decay(alpha, 100*steps_per_epoch, 0.5, transition_begin=100*steps_per_epoch, staircase=False, end_value=1e-6)
+        schedule_fn = optax.warmup_cosine_decay_schedule(alpha, 100*alpha, 10, 50*steps_per_epoch)
         state = TrainState.create(
             apply_fn=model.apply,
             params = params['params'],
@@ -155,10 +155,16 @@ def train(state, args, dm):
         if args.push_forward:
           w_pf = vmap(predict, in_axes=(None,0,None, None, None, None))(params, input, y.shape[-1], args.teacher_forcing, 1, args.push_forward)
           loss_stability = vmap(lossl2, axis_name='v')(w_pf[...,args.pf_steps+args.input_steps:], y[...,args.pf_steps:])
+        if args.unroll_loss:
+           w_ur = vmap(predict, in_axes=(None,0, None, None, None, None))(params, input, args.unroll_steps, False, 1, False)
+           loss_stability = vmap(lossl2, axis_name='v')(w_ur[...,args.input_steps:], y[...,:args.unroll_steps])
         loss_val = vmap(lossl2, axis_name='v')(w[...,args.input_steps:], y)
-        loss_res = vmap(pde_vor_loss, axis_name='v')(w,input)
-        output = args.x_data * loss_val  + args.x_pde * loss_res + loss_stability
-        return output[0], (loss_val[0], loss_res[0])
+        if args.dataset == '2dturb':
+          loss_res = vmap(pde_vor_loss, axis_name='v')(w,input)
+        else:
+          loss_res = vmap(pde_loss, axis_name='v')(w,input)
+        output = args.x_data * loss_val  + args.x_pde * loss_res + args.x_stab * loss_stability
+        return output[0], (loss_val[0], loss_res[0], loss_stability[0])
 
 
 
@@ -190,7 +196,7 @@ def train(state, args, dm):
     plt.rc("font", size=16, family='serif')
     N = field.shape[-1]
     idx = np.random.randint(field.shape[0])
-    time_steps = np.arange(10,N,(N-10)//3)
+    time_steps = np.arange(10,N+1,(N-10)//3)-1
     fig, axs = plt.subplots(2,4,figsize=(20,10))
     fig.suptitle('Ground truth vs. Prediction',fontsize=24)
     ax = axs[0,0]
@@ -225,16 +231,24 @@ def train(state, args, dm):
     val_loss = []
     preds = []
     for i, inputs in enumerate(dm.val_dataloader()):
-            inputs = inputs[...,::2,::2,:]
+            inputs = inputs[:,::args.ds,::args.ds].numpy()
             bs = inputs.shape[0]
             size_x = inputs.shape[1]
             size_y = inputs.shape[2]
-            inputs = (inputs.numpy()).reshape(num_devices,bs//num_devices,size_x,size_y,args.output_features,-1)
-            outputs = val_step(state,inputs,None,None)
-            val_loss.append(outputs[0][0])
-            preds.append(outputs[1])
+            r = np.max([size_x,size_y]) // np.min([size_x,size_y])
+            if size_x != size_y:
+              l = int(np.min([size_x,size_y]))
+            else:
+              l = size_x
+            for n in range(r):
+              nx = int(np.min([size_x, l*(n+1)]))
+              ny = int(np.min([size_y, l*(n+1)]))
+              inputs = inputs.reshape(num_devices,bs//num_devices,size_x,size_y,args.output_features,-1)
+              outputs = val_step(state,inputs[:,:,nx-l:nx,ny-l:ny],None,None)
+              val_loss.append(outputs[0][0])
+              preds.append(outputs[1])
     t2 = default_timer()
-    fig = plot_fields(inputs[0,:,:,:,0],outputs[1][0,:,:,:,0])
+    fig = plot_fields(inputs[0,:,nx-l:nx,ny-l:ny,0],outputs[1][0,:,:,:,0])
     val_loss = np.mean(np.concatenate(val_loss, axis=0), axis=0)
     print('elapsed time: {} '.format(t2-t1))
     print(val_loss.mean())
@@ -246,28 +260,41 @@ def train(state, args, dm):
         epoch_loss = 0.0
         epoch_res = 0.0
         epoch_d = 0.0
-        n = len(dm.train_dataloader())
+        epoch_stab = 0.0
+        nb = len(dm.train_dataloader())
         for j, inputs in enumerate(dm.train_dataloader()):
           T = inputs.shape[-1]
-          inputs = inputs[:,::2,::2].numpy()
+          inputs = inputs[:,::args.ds,::args.ds].numpy()
           bs = inputs.shape[0]
           size_x = inputs.shape[1]
           size_y = inputs.shape[2]
+          r = np.max([size_x,size_y]) // np.min([size_x,size_y])
+          if size_x != size_y:
+            l = int(np.min([size_x,size_y]))
+          else:
+            l = size_x
           inputs = inputs.reshape(num_devices,bs//num_devices,size_x,size_y,args.output_features,-1)
           time_window = args.time_window
           for t in range(T//time_window):
-            state, output = train_step(state, inputs[...,time_window*t:time_window*(t+1)])
-            loss_val = output[0]
-            residual = output[1]
-            epoch_loss += loss_val/(n*T/time_window)
-            epoch_res += residual/(n*T/time_window)
-            print('epoch {}:'.format(state.epoch[0]),'loss step {}: '.format(state.step[0]), loss_val[0], 
-                    'pde_loss step {}: '.format(state.step[0]), residual[0])
+            for n in range(r):
+              nx = int(np.min([size_x, l*(n+1)]))
+              ny = int(np.min([size_y, l*(n+1)]))
+              state, output = train_step(state, inputs[:,:,nx-l:nx,ny-l:ny,:,time_window*t:time_window*(t+1)])
+              loss_val = output[0]
+              residual = output[1]
+              loss_stability = output[2]
+              epoch_loss += loss_val/(nb*r*T/time_window)
+              epoch_res += residual/(nb*r*T/time_window)
+              epoch_stab += loss_stability/(nb*r*T/time_window)
+              print('epoch {}:'.format(state.epoch[0]),'loss step {}: '.format(state.step[0]), loss_val[0], 
+                      'pde_loss step {}: '.format(state.step[0]), residual[0], 
+                      'stability_loss step {}: '.format(state.step[0]), loss_stability[0])
         t2 = default_timer()
         print('epoch {}: '.format(state.epoch[0]),'elapsed time: {} '.format(t2-t1),'loss epoch: ', epoch_loss[0],
-                'pde_loss epoch: ', epoch_res[0])
+                'pde_loss epoch: ', epoch_res[0], 'stability_loss_epoch: ', epoch_stab[0])
         wandb.log({'training_loss': epoch_loss[0],
-                    'pde_loss': epoch_res[0]})
+                    'pde_loss': epoch_res[0],
+                    'stability_loss': epoch_stab[0]})
           
         save_checkpoint(state, i, prefix='ckpt_epoch_', save_path = args.save_path)
         if epoch_loss[0] < min:
