@@ -58,6 +58,10 @@ def main(args):
         id = args.id
       wandb.init(project="turbulence_surrogates", entity="deepl4cfd", config=args, id=id, resume='allow', dir=args.save_path)
 
+    
+    if not os.path.exists(wandb.config['save_path']):
+      os.mkdir(wandb.config['save_path'])
+    
     batch_size = wandb.config['batch_size']
     dataset = wandb.config['dataset']
 
