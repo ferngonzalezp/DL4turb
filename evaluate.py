@@ -22,6 +22,7 @@ import os
 import random
 import matplotlib.pyplot as plt
 from compute_tke_spectrum import compute_tke_spectrum, plot_tkespec_1d
+import pandas as pd
 
 def main(args):
 
@@ -149,6 +150,8 @@ def main(args):
     return val_loss, pde_loss, fig, real, pred_l
 
   Val_loss, pde_loss, fig, real, pred_l = test_loop()
+  losses = pd.DataFrame(data = {'val_loss': Val_loss.mean(), 'pde_loss': pde_loss.mean()})
+  losses.to_csv(args.save_path+'/losses.csv')
   #np.save(args.save_path+'/preds_'+args.model, preds)
   #np.save(args.save_path+'/preds_1000t_'+args.model, pred_l)
   fig[0].savefig(args.save_path+'/Preds_'+args.model+'.png')
