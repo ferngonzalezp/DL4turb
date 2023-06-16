@@ -29,3 +29,4 @@ causality_train: False
 epsilon_data: 0.01
 epsilon_eq: 0.01
 pred_delta: False
+denoise: False
