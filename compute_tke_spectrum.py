@@ -6,7 +6,6 @@ from scipy.signal import convolve
 import functools
 import jax
 from jax import vmap
-from jax import lax
 import sys
 import os
 import random
@@ -95,7 +94,7 @@ def compute_tke_spectrum(u, lx, ly, one_dimensional = True):
 def plot_tkespec_1d(knyquist, wavenumbers, tkespec, title):
     plt.rc("font", size=10, family='serif')
 
-    fig = plt.figure(figsize=(6, 4.8), dpi=200, constrained_layout=True)
+    fig = plt.figure(figsize=(4, 2.8), dpi=200, constrained_layout=True)
     l = []
     for i in range(len(tkespec)):
       l1, = plt.loglog(wavenumbers, tkespec[i]['spec'], tkespec[i]['color'], label=tkespec[i]['label'], markersize=3, markerfacecolor='w', markevery=5)
@@ -107,7 +106,7 @@ def plot_tkespec_1d(knyquist, wavenumbers, tkespec, title):
     plt.xlabel('$\kappa$ (1/m)')
     plt.ylabel('$E(\kappa)$ (m$^3$/s$^2$)')
     plt.grid()
-    #plt.gcf().tight_layout()
+    plt.gcf().tight_layout()
     plt.title(title + str(len(wavenumbers)) + 'x' + str(len(wavenumbers)))
     plt.legend(handles=l, loc=3)
     return fig
@@ -115,28 +114,40 @@ def plot_tkespec_1d(knyquist, wavenumbers, tkespec, title):
 
 def main(args):
 
-  dm = ns2d_dm(args.data_path, batch_size=args.batch_size, test_all=False)
+  dm = ns2d_dm(args.data_path, batch_size=args.batch_size, test_all=True)
   dm.setup()
-  preds = np.load(args.save_path+'/preds_'+args.model+'.npy')
-  print(preds.shape)
-  #pred_l = np.load(args.save_path+'/preds_1000t_'+args.model+'.npy')
-  T = np.arange(10, preds.shape[-1], (preds.shape[-1] - 10)//3 - 1)
-  E_real = [0.0] * len(T)
-  E_pred = [0.0] * len(T)
-  E_pred_l = [0.0] * len(T)
+  preds = np.load(args.save_path+'/preds_'+args.model+'.py')
+  preds_l = np.load(args.save_path+'/preds_1000t_'+args.model+'.py')
+  T = real.shape[-1]
+  E_real = 0.0
+  E_pred = 0.0
+  E_pred_l = 0.0
 
-  for i in range(len(T)):
-    for j, batch in enumerate(dm.test_dataloader()):  
+  for j, batch in enumerate(dm.test_dataloader()):
+    for i in range(T):
       real = batch.numpy()
-      knyquist, k, E1 = compute_tke_spectrum(real[:,::2,::2,i],2*np.pi,2*np.pi,True)
+      knyquist, k, E1 = compute_tke_spectrum(real[...,i],2*np.pi,2*np.pi,True)
       knyquist, k, E2 = compute_tke_spectrum(preds[0,j*args.batch_size:(j+1)*args.batch_size,...,0,i],2*np.pi,2*np.pi,True)
-      E_real[i] += E1[0] / preds.shape[0]
-      E_pred[i] += E2[0] / preds.shape[0]
+      E_real += E1[0]/preds.shape[1]
+      E_pred += E2[0]/preds.shape[1]
+  
+  E_real = E_real/T
+  E_pred = E_pred/T
 
-    E = [{'spec': E_real[i], 'color': '-k', 'label':'Sim'},
-      {'spec': E_pred[i], 'color': '-bo', 'label':args.model}]
-    fig = plot_tkespec_1d(knyquist[0],k[0],E, 'TKE Spectrum T = {}$\delta t$'.format(T[i]))
-    fig.savefig(args.model + '/tke_{}.png'.format(args.model))
+  E = [{'spec': E_real, 'color': '-k', 'label':'Sim'},
+     {'spec': E_pred, 'color': '-bo', 'label':args.model}]
+  fig = plot_tkespec_1d(knyquist[0],k[0],E, 'averaged KE Spectrum')
+  fig.savefig(args.model + '/tke_{}.png'.format(args.model))
+
+  for i in range(1000):
+    knyquist, k, E3 = compute_tke_spectrum(pred_l[0,...,0,i],2*np.pi,2*np.pi,True)
+    E_pred_l += E3/pred_l.shape[1]
+  E_pred_l = E_pred_l/1000
+
+  E = [{'spec': E_real, 'color': '-k', 'label':'Sim'},
+     {'spec': E_pred_l, 'color': '-bo', 'label':args.model+' Long T = 1000'}]
+  fig = plot_tkespec_1d(knyquist[0],k[0],E, 'averaged KE Spectrum')
+  fig.savefig(args.model + '/tke_L_{}.png'.format(args.model))
 
 if __name__ == "__main__":
 
