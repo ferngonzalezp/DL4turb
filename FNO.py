@@ -46,8 +46,7 @@ class SpectralConv2d_fast(nn.Module):
     return x
 
 class FNO2d(nn.Module):
-    modes1: int = 20
-    modes2: int = 20
+    modes: int = 20
     width: int = 32
     T: int = 4
     output_features: int = 1
@@ -71,7 +70,7 @@ class FNO2d(nn.Module):
         w = []
 
         for i in range(self.T):
-          conv.append(SpectralConv2d_fast(self.width, self.width, self.modes1, self.modes2))
+          conv.append(SpectralConv2d_fast(self.width, self.width, self.modes, self.modes))
           w.append(nn.Conv(self.width, [1]))
 
         self.conv = conv

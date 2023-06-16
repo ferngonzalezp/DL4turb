@@ -92,7 +92,7 @@ class ns2d_dm(pl.LightningDataModule):
     return None
   def setup(self,stage=None):
     data = self.reader.read_field('u')
-    self.train_data, self.val_data = [mydataset(data[:data.shape[0]*9//10][:1000]),  mydataset(data[data.shape[0]*9//10:])]
+    self.train_data, self.val_data = [mydataset(data[:data.shape[0]*9//10][:50]),  mydataset(data[data.shape[0]*9//10:])]
 
   def train_dataloader(self):
     return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=2,shuffle=True)

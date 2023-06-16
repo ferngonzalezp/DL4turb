@@ -15,7 +15,7 @@ class mydataset(torch.utils.data.Dataset):
     return len(self.data['batch'])
 
   def __getitem__(self,idx):
-    return (self.data.isel(batch=[idx])['w'].values[0] - self.min) / (self.max - self.min)
+    return 1 - 2* (self.data.isel(batch=[idx])['w'].values[0] - self.min) / (self.max - self.min)
       
 class ns2d_dm(pl.LightningDataModule):
   
@@ -35,12 +35,16 @@ class ns2d_dm(pl.LightningDataModule):
       self.test_data = mydataset(data)
     else:
       self.test_data = self.val_data
+  
+  def unnormalize(self,x):
+    x = self.test_data.min - 0.5*(x - 1)*(self.test_data.max - self.test_data.min)
+    return x
 
   def train_dataloader(self):
     return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=0, shuffle=True)
 
   def val_dataloader(self):
-    return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=0)
+    return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=0)
 
   def test_dataloader(self):
     return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=0)

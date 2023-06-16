@@ -82,10 +82,10 @@ class ds_conv(nn.Module):
       x = jax.vmap(jax.scipy.ndimage.map_coordinates, in_axes=(-1,None,None),out_axes=-1)(x,coords,1)
       x2 = nn.Conv(self.out_feats, [1,1], [self.strides, self.strides])(x)
       x = nn.GroupNorm(1)(x)
-      x = nn.swish(x)
+      x = nn.gelu(x)
       x = nn.Conv(self.out_feats, [self.kernel, self.kernel], [self.strides, self.strides])(x)
       x = nn.GroupNorm(1)(x)
-      x = nn.swish(x)
+      x = nn.gelu(x)
       x = nn.Conv(self.out_feats, [self.kernel, self.kernel], kernel_init = nn.initializers.constant(0.0))(x)
       x = x + x2
       return x
@@ -101,10 +101,10 @@ class us_conv(nn.Module):
       ny = x.shape[1]
       x2 = nn.ConvTranspose(self.out_feats, [1,1], [self.strides, self.strides])(x)
       x = nn.GroupNorm(1)(x)
-      x = nn.swish(x)
+      x = nn.gelu(x)
       x = nn.ConvTranspose(self.out_feats, [self.kernel, self.kernel], kernel_init = nn.initializers.constant(0.0))(x)
       x = nn.GroupNorm(1)(x)
-      x = nn.swish(x)
+      x = nn.gelu(x)
       x = nn.ConvTranspose(self.out_feats, [self.kernel, self.kernel], [self.strides, self.strides])(x)
       x = x + x2
       coords = jnp.meshgrid(jnp.linspace(0,nx,int(x.shape[0]*2)), 
@@ -113,10 +113,10 @@ class us_conv(nn.Module):
       return x
 
 class UFNET(nn.Module):
-  encoder_blocks: int = 4
-  proc_layers: int = 2
-  decoder_blocks: int = 4
-  width_fc: int = 32
+  encoder_blocks: int = 3
+  proc_layers: int = 3
+  decoder_blocks: int = 3
+  width_fc: int = 8
   output_feats: int = 1
 
   def setup(self):
@@ -126,8 +126,8 @@ class UFNET(nn.Module):
     encoder = []
     processor = []
     decoder = []
-    width = self.width_fc * np.array([1,2,2,4])
-    fblocks = 1
+    width = self.width_fc * np.array([2,4,16])
+    fblocks = 0
     for i in range(self.encoder_blocks-fblocks):
       encoder.append(ds_conv(
                             width[i],
@@ -136,7 +136,7 @@ class UFNET(nn.Module):
       encoder.append(operatorBlock(width[self.encoder_blocks-fblocks-1+i], 
                     width[self.encoder_blocks-fblocks+i],
                     modes = 8, scale = 1))
-    for i in range(self.encoder_blocks):
+    for i in range(self.proc_layers):
       processor.append(operatorBlock(width[-1], 
                     width[-1],
                     modes = 8, scale = 1))
@@ -165,7 +165,6 @@ class UFNET(nn.Module):
 
       size_x, size_y = [x.shape[0], x.shape[1]]
       x = x.reshape(size_x, size_y, -1)
-      x0 = x
       grid = self.get_grid(x.shape)
       x = jnp.concatenate((x, grid), axis=-1)
       x = self.fc0(x)
@@ -180,9 +179,9 @@ class UFNET(nn.Module):
       for i in range(self.decoder_blocks):
         x = self.decoder[i](jnp.concatenate([x,h[-(i+1)]],-1))
       
-      x = nn.swish(x)
+      x = nn.gelu(x)
       x = self.fc1(x)
-      x = nn.swish(x)
+      x = nn.gelu(x)
       x = self.fc2(x)
 
-      return x + x0
+      return x

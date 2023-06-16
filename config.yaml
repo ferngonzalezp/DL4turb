@@ -1,0 +1,59 @@
+program: /mnt/DL4turb/train.py
+method: bayes
+metric:
+  name: validation_pde_loss
+  goal: minimize
+early_terminate:
+  type: hyperband
+  min_iter: 1
+controller:
+  type: local
+parameters:
+  lr:
+    min: 0.00001
+    max: 0.001
+  pf_steps:
+    values: [2, 3, 4, 5]
+  x_data:
+    min: 1
+    max: 10
+  x_diff:
+    min: 0
+    max: 100
+  x_adv:
+    min: 0
+    max: 100
+  x_dt:
+    min: 0
+    max: 100
+  x_stab:
+    min: 0
+    max: 100
+  model:
+    value: "FNO"
+  modes:
+    value: 12
+  ds:
+    value: 2
+  output_features:
+    value: 1
+  dataset:
+    value: "2dturb"
+  data_path:
+    value: "/mnt/2d_NS/NS_L2pi_256_T200_Re100"
+  batch_size:
+    value: 4
+  max_epochs:
+    value: 10
+  time_window:
+    value: 10
+  save_path:
+    value: '/mnt/hyperparam_tune_FNO'
+  push_forward:
+    value: True
+  teacher_forcing:
+    value: True
+command:
+  - python3
+  - train.py
+  - ${args_no_boolean_flags}
